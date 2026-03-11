@@ -1,0 +1,508 @@
+from flask import request, jsonify
+from app import app
+from models import db, User, Subject, Enrollment, Grade, Communication, Resource, SupportTicket, StudentDocument, SubjectMaterial
+import jwt
+import datetime
+from functools import wraps
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            parts = request.headers['Authorization'].split()
+            if len(parts) == 2 and parts[0] == 'Bearer':
+                token = parts[1]
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 401
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            current_user = User.query.filter_by(id=data['id']).first()
+        except Exception as e:
+            return jsonify({'message': 'Token is invalid!', 'error': str(e)}), 401
+        return f(current_user, *args, **kwargs)
+    return decorated
+# ─── AUTH ────────────────────────────────────────────────────────────────────
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({'message': 'Could not verify'}), 401
+    user = User.query.filter_by(username=data['username']).first()
+    if not user:
+        return jsonify({'message': 'User not found'}), 401
+    if user.check_password(data['password']):
+        token = jwt.encode({
+            'id': user.id,
+            'role': user.role,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+        }, app.config['SECRET_KEY'], algorithm="HS256")
+        return jsonify({'token': token, 'user': user.to_dict()})
+    return jsonify({'message': 'Invalid credentials'}), 401
+@app.route('/api/profile/password', methods=['PUT'])
+@token_required
+def change_password(current_user):
+    data = request.get_json()
+    if not data or not data.get('new_password'):
+        return jsonify({'message': 'New password is required'}), 400
+    current_user.set_password(data['new_password'])
+    db.session.commit()
+    return jsonify({'message': 'Password updated successfully'})
+# ─── DIRECTOR ────────────────────────────────────────────────────────────────
+@app.route('/api/director/stats', methods=['GET'])
+@token_required
+def director_stats(current_user):
+    if current_user.role != 'director':
+        return jsonify({'message': 'Unauthorized'}), 403
+    return jsonify({
+        'total_users': User.query.count(),
+        'teachers': User.query.filter_by(role='profesor').count(),
+        'students': User.query.filter_by(role='estudiante').count(),
+        'subjects': Subject.query.count()
+    })
+@app.route('/api/director/personnel', methods=['GET'])
+@token_required
+def get_personnel(current_user):
+    if current_user.role != 'director':
+        return jsonify({'message': 'Unauthorized'}), 403
+    personnel = User.query.filter(User.role.in_(['profesor', 'secretaria'])).all()
+    return jsonify([p.to_dict() for p in personnel])
+# Los anuncios se manejan al final con /api/announcement
+# ─── SUBJECTS (Director & Secretaria) ─────────────────────────────────────────
+@app.route('/api/subjects', methods=['GET'])
+@token_required
+def get_all_subjects(current_user):
+    """Lista todas las materias con docente asignado."""
+    if current_user.role not in ['director', 'secretaria', 'profesor']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    subjects = Subject.query.all()
+    return jsonify([s.to_dict() for s in subjects])
+@app.route('/api/subjects', methods=['POST'])
+@token_required
+def create_subject(current_user):
+    """Crear una nueva materia (director o secretaria)."""
+    if current_user.role not in ['director', 'secretaria']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    if not data or not data.get('name') or not data.get('area'):
+        return jsonify({'message': 'Subject name and area are required'}), 400
+    subject = Subject(name=data['name'], area=data['area'], teacher_id=data.get('teacher_id'))
+    db.session.add(subject)
+    db.session.commit()
+    return jsonify({'message': 'Materia creada exitosamente', 'subject': subject.to_dict()}), 201
+@app.route('/api/subjects/<int:subject_id>/assign', methods=['PUT'])
+@token_required
+def assign_teacher(current_user, subject_id):
+    """Asignar un docente a una materia."""
+    if current_user.role not in ['director', 'secretaria']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    teacher_id = data.get('teacher_id')
+    subject = Subject.query.get_or_404(subject_id)
+    if teacher_id:
+        teacher = User.query.filter_by(id=teacher_id, role='profesor').first()
+        if not teacher:
+            return jsonify({'message': 'Teacher not found'}), 404
+    subject.teacher_id = teacher_id
+    db.session.commit()
+    return jsonify({'message': 'Docente asignado exitosamente', 'subject': subject.to_dict()})
+@app.route('/api/subjects/<int:subject_id>/students', methods=['GET'])
+@token_required
+def get_enrolled_students(current_user, subject_id):
+    """Obtener lista de estudiantes inscritos en una materia (secretaria / director)."""
+    if current_user.role not in ['director', 'secretaria']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    subject = Subject.query.get_or_404(subject_id)
+    enrollments = Enrollment.query.filter_by(subject_id=subject_id).all()
+    return jsonify({
+        'subject': subject.to_dict(),
+        'students': [e.to_dict() for e in enrollments],
+        'total': len(enrollments)
+    })
+# ─── SECRETARY ────────────────────────────────────────────────────────────────
+@app.route('/api/secretaria/users', methods=['POST'])
+@token_required
+def create_user(current_user):
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    if User.query.filter_by(username=data.get('username')).first():
+        return jsonify({'message': 'Username already exists'}), 400
+    new_user = User(
+        role=data['role'],
+        username=data['username'],
+        first_name=data['first_name'],
+        last_name=data['last_name'],
+        carnet=data['carnet']
+    )
+    new_user.set_password(data['carnet'])
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'User created successfully', 'user': new_user.to_dict()})
+@app.route('/api/users', methods=['GET'])
+@token_required
+def get_users(current_user):
+    if current_user.role not in ['director', 'secretaria', 'profesor']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    role_filter = request.args.get('role')
+    if role_filter:
+        users = User.query.filter_by(role=role_filter).all()
+    else:
+        users = User.query.all()
+    return jsonify([user.to_dict() for user in users])
+@app.route('/api/users/<int:uid>/password', methods=['PUT'])
+@token_required
+def update_password(current_user, uid):
+    if current_user.id != uid:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    old_pw = data.get('old_password')
+    new_pw = data.get('new_password')
+    if not old_pw or not new_pw:
+        return jsonify({'message': 'Both old_password and new_password are required'}), 400
+    if not current_user.check_password(old_pw):
+        return jsonify({'message': 'La contraseña actual es incorrecta'}), 401
+    if len(new_pw) < 6:
+        return jsonify({'message': 'La nueva contraseña debe tener al menos 6 caracteres'}), 400
+    current_user.set_password(new_pw)
+    db.session.commit()
+    return jsonify({'message': 'Password updated'})
+@app.route('/api/secretaria/enroll', methods=['POST'])
+@token_required
+def enroll_student(current_user):
+    """Inscribir un estudiante a una materia."""
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    student_id = data.get('student_id')
+    subject_id = data.get('subject_id')
+    level = data.get('level', 'Único')
+    if not student_id or not subject_id:
+        return jsonify({'message': 'student_id and subject_id are required'}), 400
+    student = User.query.filter_by(id=student_id, role='estudiante').first()
+    subject = Subject.query.filter_by(id=subject_id).first()
+    if not student or not subject:
+        return jsonify({'message': 'Estudiante o Materia no encontrados'}), 404
+    
+    # Check if already enrolled in this exact subject and level
+    existing_enr = Enrollment.query.filter_by(student_id=student.id, subject_id=subject.id, level=level).first()
+    if existing_enr:
+        return jsonify({'message': 'El estudiante ya está inscrito en este nivel de la materia'}), 400
+        
+    enrollment = Enrollment(student_id=student.id, subject_id=subject.id, level=level)
+    db.session.add(enrollment)
+    db.session.commit()
+    return jsonify({'message': 'Inscripción exitosa', 'enrollment': enrollment.to_dict()}), 201
+@app.route('/api/secretaria/enroll/<int:enrollment_id>', methods=['DELETE'])
+@token_required
+def unenroll_student(current_user, enrollment_id):
+    """Eliminar una inscripción."""
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    enrollment = Enrollment.query.get_or_404(enrollment_id)
+    db.session.delete(enrollment)
+    db.session.commit()
+    return jsonify({'message': 'Inscripción eliminada exitosamente'})
+# ─── DOCUMENTS ────────────────────────────────────────────────────────────────
+@app.route('/api/secretaria/documents/<int:student_id>', methods=['GET'])
+@token_required
+def get_student_documents(current_user, student_id):
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    
+    docs = StudentDocument.query.filter_by(student_id=student_id).all()
+    
+    # Auto-initialize default documents if missing
+    if not docs:
+        default_docs = ["Certificado de Nacimiento", "Cédula de Identidad", "Libreta Escolar"]
+        for d in default_docs:
+            new_doc = StudentDocument(student_id=student_id, document_name=d, is_submitted=False)
+            db.session.add(new_doc)
+        db.session.commit()
+        docs = StudentDocument.query.filter_by(student_id=student_id).all()
+        
+    return jsonify([d.to_dict() for d in docs])
+@app.route('/api/secretaria/documents', methods=['POST'])
+@token_required
+def add_document_requirement(current_user):
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    doc = StudentDocument(
+        student_id=data['student_id'],
+        document_name=data['document_name'],
+        is_submitted=data.get('is_submitted', False)
+    )
+    db.session.add(doc)
+    db.session.commit()
+    return jsonify(doc.to_dict()), 201
+@app.route('/api/secretaria/documents/<int:doc_id>/toggle', methods=['PUT'])
+@token_required
+def toggle_document(current_user, doc_id):
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    doc = StudentDocument.query.get_or_404(doc_id)
+    doc.is_submitted = not doc.is_submitted
+    db.session.commit()
+    return jsonify(doc.to_dict())
+@app.route('/api/secretaria/documents/<int:doc_id>', methods=['DELETE'])
+@token_required
+def delete_document(current_user, doc_id):
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    doc = StudentDocument.query.get_or_404(doc_id)
+    db.session.delete(doc)
+    db.session.commit()
+    return jsonify({'message': 'Documento eliminado exitosamente'})
+# ─── TEACHER ──────────────────────────────────────────────────────────────────
+@app.route('/api/profesor/subjects', methods=['GET'])
+@token_required
+def teacher_subjects(current_user):
+    if current_user.role != 'profesor':
+        return jsonify({'message': 'Unauthorized'}), 403
+    subjects = Subject.query.filter_by(teacher_id=current_user.id).all()
+    return jsonify([s.to_dict() for s in subjects])
+@app.route('/api/profesor/students_by_subject/<int:subject_id>', methods=['GET'])
+@token_required
+def students_by_subject(current_user, subject_id):
+    if current_user.role != 'profesor':
+        return jsonify({'message': 'Unauthorized'}), 403
+    subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+    if not subject:
+        return jsonify({'message': 'Subject not found or unauthorized'}), 404
+    enrollments = Enrollment.query.filter_by(subject_id=subject.id).all()
+    students = []
+    for enr in enrollments:
+        student_data = enr.student.to_dict()
+        student_data['enrollment_id'] = enr.id
+        student_data['level'] = enr.level
+        grades = Grade.query.filter_by(enrollment_id=enr.id).all()
+        student_data['grades'] = [g.to_dict() for g in grades]
+        students.append(student_data)
+    return jsonify({'subject': subject.name, 'area': subject.area, 'students': students})
+@app.route('/api/profesor/grade', methods=['POST'])
+@token_required
+def assign_grade(current_user):
+    if current_user.role != 'profesor':
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    enrollment_id = data.get('enrollment_id')
+    dimension = data.get('dimension') # Now represents module name like 'Módulo 1'
+    score = data.get('score')
+    
+    if not enrollment_id or not dimension or score is None:
+        return jsonify({'message': 'enrollment_id, dimension and score are required'}), 400
+    
+    enr = Enrollment.query.filter_by(id=enrollment_id).first()
+    if not enr or enr.subject.teacher_id != current_user.id:
+        return jsonify({'message': 'Unauthorized to grade this text'}), 403
+        
+    grade = Grade.query.filter_by(enrollment_id=enrollment_id, dimension=dimension).first()
+    if grade:
+        grade.score = score
+    else:
+        grade = Grade(enrollment_id=enrollment_id, dimension=dimension, score=score)
+        db.session.add(grade)
+    db.session.commit()
+    return jsonify({'message': 'Grade assigned correctly', 'grade': grade.to_dict()})
+# ─── SUBJECT MATERIALS ────────────────────────────────────────────────────────
+@app.route('/api/profesor/materials/<int:subject_id>', methods=['GET'])
+@token_required
+def get_subject_materials(current_user, subject_id):
+    if current_user.role != 'profesor':
+        return jsonify({'message': 'Unauthorized'}), 403
+    materials = SubjectMaterial.query.filter_by(subject_id=subject_id).all()
+    return jsonify([m.to_dict() for m in materials])
+@app.route('/api/profesor/materials', methods=['POST'])
+@token_required
+def add_subject_material(current_user):
+    if current_user.role != 'profesor':
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    subject = Subject.query.filter_by(id=data['subject_id'], teacher_id=current_user.id).first()
+    if not subject:
+        return jsonify({'message': 'Subject not found or not assigned to you'}), 404
+    mat = SubjectMaterial(
+        subject_id=data['subject_id'],
+        teacher_id=current_user.id,
+        title=data['title'],
+        url=data['url']
+    )
+    db.session.add(mat)
+    db.session.commit()
+    return jsonify(mat.to_dict()), 201
+@app.route('/api/profesor/materials/<int:mid>', methods=['DELETE'])
+@token_required
+def delete_subject_material(current_user, mid):
+    if current_user.role != 'profesor':
+        return jsonify({'message': 'Unauthorized'}), 403
+    mat = SubjectMaterial.query.get_or_404(mid)
+    if mat.teacher_id != current_user.id:
+        return jsonify({'message': 'Unauthorized'}), 403
+    db.session.delete(mat)
+    db.session.commit()
+    return jsonify({'message': 'Material eliminado'})
+# ─── STUDENT ──────────────────────────────────────────────────────────────────
+@app.route('/api/estudiante/grades', methods=['GET'])
+@token_required
+def get_student_grades(current_user):
+    if current_user.role != 'estudiante':
+        return jsonify({'message': 'Unauthorized'}), 403
+    enrollments = Enrollment.query.filter_by(student_id=current_user.id).all()
+    results = []
+    for enr in enrollments:
+        grades = Grade.query.filter_by(enrollment_id=enr.id).all()
+        grades_dict = {g.dimension: g.score for g in grades}
+        area = enr.subject.area if enr.subject else 'Humanística'
+        level = enr.level or 'Único'
+        
+        if area == 'Técnica':
+            modules = ['Módulo 1', 'Módulo 2', 'Módulo 3', 'Módulo 4', 'Módulo 5']
+            module_scores = [grades_dict.get(m) for m in modules]
+            filled = [s for s in module_scores if s is not None]
+            promedio = round(sum(filled) / len(filled), 1) if filled else None
+            estado = 'Aprobado' if (promedio is not None and promedio >= 51) else ('Sin notas' if promedio is None else 'Reprobado')
+        else:
+            modules = ['Módulo 1', 'Módulo 2']
+            module_scores = [grades_dict.get(m) for m in modules]
+            filled = [s for s in module_scores if s is not None]
+            promedio = round(sum(filled) / len(filled), 1) if filled else None
+            estado = 'Aprobado' if (promedio is not None and promedio >= 51) else ('Sin notas' if promedio is None else 'Reprobado')
+        
+        teacher_name = f"{enr.subject.teacher.first_name} {enr.subject.teacher.last_name}" if enr.subject and enr.subject.teacher else "No asignado"
+        results.append({
+            'subject': enr.subject.name,
+            'subject_id': enr.subject_id,
+            'area': area,
+            'level': level,
+            'teacher_name': teacher_name,
+            'modules': modules,
+            'module_scores': {m: grades_dict.get(m) for m in modules},
+            'promedio': promedio,
+            'estado': estado
+        })
+    return jsonify(results)
+@app.route('/api/estudiante/materials/<int:subject_id>', methods=['GET'])
+@token_required
+def get_student_subject_materials(current_user, subject_id):
+    if current_user.role != 'estudiante':
+        return jsonify({'message': 'Unauthorized'}), 403
+    enr = Enrollment.query.filter_by(student_id=current_user.id, subject_id=subject_id).first()
+    if not enr:
+        return jsonify({'message': 'Not enrolled in this subject'}), 403
+    materials = SubjectMaterial.query.filter_by(subject_id=subject_id).all()
+    return jsonify([m.to_dict() for m in materials])
+# ─── MESSAGES ────────────────────────────────────────────────────────────────
+@app.route('/api/messages', methods=['GET'])
+@token_required
+def get_messages(current_user):
+    received = Communication.query.filter_by(receiver_id=current_user.id).order_by(Communication.timestamp.desc()).all()
+    sent_raw = Communication.query.filter_by(sender_id=current_user.id).order_by(Communication.timestamp.desc()).all()
+    
+    # Agrupar mensajes enviados idénticos (anuncios masivos)
+    sent_grouped = {}
+    for m in sent_raw:
+        # Agrupamos por mensaje y fecha (minutos)
+        group_key = f"{m.message}_{m.timestamp.strftime('%Y%m%d%H%M')}"
+        if group_key not in sent_grouped:
+            sent_grouped[group_key] = {
+                'id': m.id,
+                'message': m.message,
+                'date': m.timestamp.strftime("%Y-%m-%d %H:%M"),
+                'receivers': []
+            }
+        sent_grouped[group_key]['receivers'].append(m.receiver.role)
+    
+    sent_list = []
+    for grp in sent_grouped.values():
+        rec_roles = list(set(grp['receivers'])) # evitar duplicados de rol si hay varios
+        if len(grp['receivers']) > 1:
+            receiver_label = f"Múltiples usuarios ({', '.join(rec_roles)})"
+        else:
+            # Si solo fue a 1 persona, mostramos que fue a 1 persona de ese rol
+            receiver_label = f"1 Usuario ({rec_roles[0]})"
+            
+        sent_list.append({
+            'id': grp['id'],
+            'receiver': receiver_label,
+            'message': grp['message'],
+            'date': grp['date']
+        })
+    return jsonify({
+        'received': [{
+            'id': m.id,
+            'sender': f"{m.sender.first_name} {m.sender.last_name} ({m.sender.role})",
+            'message': m.message,
+            'date': m.timestamp.strftime("%Y-%m-%d %H:%M")
+        } for m in received],
+        'sent': sent_list
+    })
+@app.route('/api/messages/send', methods=['POST'])
+@token_required
+def send_message(current_user):
+    data = request.get_json()
+    new_msg = Communication(
+        sender_id=current_user.id,
+        receiver_id=data['receiver_id'],
+        message=data['message']
+    )
+    db.session.add(new_msg)
+    db.session.commit()
+    return jsonify({'message': 'Mensaje enviado', 'id': new_msg.id})
+@app.route('/api/announcement', methods=['POST'])
+@token_required
+def send_announcement(current_user):
+    data = request.get_json()
+    target_role = data.get('target_role')
+    message = data.get('message')
+    if not message or not target_role:
+        return jsonify({'message': 'message and target_role are required'}), 400
+    if current_user.role == 'estudiante':
+        return jsonify({'message': 'Estudiantes no pueden enviar anuncios'}), 403
+    elif current_user.role in ['profesor', 'secretaria']:
+        target_role = 'estudiante'
+    if target_role == 'todos':
+        targets = User.query.all()
+    else:
+        targets = User.query.filter_by(role=target_role).all()
+    if not targets:
+        return jsonify({'message': 'No targets found for this role'}), 404
+    count = 0
+    for t in targets:
+        # No enviarse mensaje a sí mismo en un anuncio grupal
+        if t.id == current_user.id:
+            continue
+        new_msg = Communication(
+            sender_id=current_user.id,
+            receiver_id=t.id,
+            message=message
+        )
+        db.session.add(new_msg)
+        count += 1
+    
+    db.session.commit()
+    return jsonify({'message': f'Anuncio enviado a {count} usuarios', 'count': count}), 201
+# ─── RESOURCES ────────────────────────────────────────────────────────────────
+@app.route('/api/resources', methods=['GET'])
+@token_required
+def get_resources(current_user):
+    resources = Resource.query.all()
+    return jsonify([{'id': r.id, 'title': r.title, 'url': r.url, 'type': r.type} for r in resources])
+@app.route('/api/resources', methods=['POST'])
+@token_required
+def add_resource(current_user):
+    if current_user.role != 'director':
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    r = Resource(title=data['title'], url=data['url'], type=data.get('type', 'article'), created_by=current_user.id)
+    db.session.add(r)
+    db.session.commit()
+    return jsonify({'id': r.id, 'title': r.title, 'url': r.url, 'type': r.type}), 201
+@app.route('/api/resources/<int:rid>', methods=['DELETE'])
+@token_required
+def delete_resource(current_user, rid):
+    if current_user.role != 'director':
+        return jsonify({'message': 'Unauthorized'}), 403
+    r = Resource.query.get_or_404(rid)
+    db.session.delete(r)
+    db.session.commit()
+    return jsonify({'message': 'Recurso eliminado'})
