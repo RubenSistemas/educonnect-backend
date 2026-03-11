@@ -149,6 +149,46 @@ def create_user(current_user):
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'message': 'User created successfully', 'user': new_user.to_dict()})
+
+@app.route('/api/secretaria/users_grouped', methods=['GET'])
+@token_required
+def get_users_grouped(current_user):
+    """Returns all users grouped by: Administrativos, Docentes, Estudiantes Técnica, Estudiantes Humanística."""
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    
+    all_users = User.query.all()
+    groups = {
+        'administrativos': [],
+        'docentes': [],
+        'tecnicos': [],
+        'humanisticos': []
+    }
+    
+    for u in all_users:
+        entry = {
+            'id': u.id,
+            'nombre': f"{u.first_name} {u.last_name}",
+            'correo': u.username,
+            'carnet': u.carnet,
+            'role': u.role
+        }
+        if u.role in ['director', 'secretaria']:
+            groups['administrativos'].append(entry)
+        elif u.role == 'profesor':
+            groups['docentes'].append(entry)
+        elif u.role == 'estudiante':
+            # Look up their enrollment area
+            enr = Enrollment.query.filter_by(student_id=u.id).first()
+            if enr and enr.subject and enr.subject.area == 'Técnica':
+                groups['tecnicos'].append(entry)
+            else:
+                # Default to Humanística if no enrollment or humanística area
+                groups['humanisticos'].append(entry)
+    
+    return jsonify(groups)
+
+
 @app.route('/api/users', methods=['GET'])
 @token_required
 def get_users(current_user):
