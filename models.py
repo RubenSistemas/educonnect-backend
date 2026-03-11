@@ -193,34 +193,38 @@ def create_default_accounts():
             db.session.add(new_user)
     db.session.commit()
 
-    if not Subject.query.first():
-        teacher = User.query.filter_by(role='profesor').first()
-        student = User.query.filter_by(role='estudiante').first()
-        if teacher and student:
-            math = Subject(name='Matemáticas Avanzadas', area='Humanística', teacher_id=teacher.id)
-            science = Subject(name='Ciencias Naturales', area='Humanística', teacher_id=teacher.id)
-            lang = Subject(name='Lenguaje y Literatura', area='Humanística', teacher_id=None)
-            db.session.add_all([math, science, lang])
+    # ── Especialidades oficiales del CEA ──
+    all_specialties = [
+        ('Sistemas Infom\u00e1ticos', 'T\u00e9cnica'),
+        ('Belleza Integral', 'T\u00e9cnica'),
+        ('Gastronomia', 'T\u00e9cnica'),
+        ('Parvularia', 'T\u00e9cnica'),
+        ('Fisioterapia', 'T\u00e9cnica'),
+        ('Contabilidad Publica', 'T\u00e9cnica'),
+        ('Veterinaria', 'T\u00e9cnica'),
+        ('Matematicas', 'Human\u00edstica'),
+        ('Lenguaje y Comunicacion', 'Human\u00edstica'),
+        ('Ciencias Naturales', 'Human\u00edstica'),
+        ('Ciencias Sociales', 'Human\u00edstica'),
+    ]
+    for name, area in all_specialties:
+        if not Subject.query.filter_by(name=name).first():
+            db.session.add(Subject(name=name, area=area, teacher_id=None))
+    db.session.commit()
+
+    # Demo enrollment for default student (only if no enrollments yet)
+    student = User.query.filter_by(role='estudiante').first()
+    if student and not Enrollment.query.filter_by(student_id=student.id).first():
+        first_subject = Subject.query.first()
+        if first_subject:
+            enr = Enrollment(student_id=student.id, subject_id=first_subject.id, level='Ciclo de Aprendizajes Elementales')
+            db.session.add(enr)
             db.session.commit()
-
-            e1 = Enrollment(student_id=student.id, subject_id=math.id)
-            e2 = Enrollment(student_id=student.id, subject_id=science.id)
-            db.session.add_all([e1, e2])
-            db.session.commit()
-
-            grades_data = [
-                Grade(enrollment_id=e1.id, dimension='ser', score=10),
-                Grade(enrollment_id=e1.id, dimension='saber', score=25),
-                Grade(enrollment_id=e1.id, dimension='decidir', score=9),
-                Grade(enrollment_id=e1.id, dimension='hacer', score=35),
-                Grade(enrollment_id=e1.id, dimension='autoevaluacion', score=10),
-            ]
-            db.session.add_all(grades_data)
-
             docs = [
                 StudentDocument(student_id=student.id, document_name='Certificado de Nacimiento', is_submitted=True),
                 StudentDocument(student_id=student.id, document_name='Fotocopia Carnet', is_submitted=False),
                 StudentDocument(student_id=student.id, document_name='Libreta Anterior', is_submitted=False),
             ]
             db.session.add_all(docs)
+            db.session.commit()
             db.session.commit()
