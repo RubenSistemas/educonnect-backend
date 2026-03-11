@@ -38,6 +38,30 @@ try:
         # Importar rutas al final para evitar circularidad
         import routes 
         db.create_all()
+        
+        # ── MIGRACIÓN SEGURA: añadir columna 'level' si no existe ──
+        try:
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                # PostgreSQL
+                if 'postgresql' in str(db.engine.url):
+                    conn.execute(text(
+                        "ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS level VARCHAR(100) DEFAULT 'Único'"
+                    ))
+                else:
+                    # SQLite no soporta IF NOT EXISTS en ALTER TABLE, 
+                    # intentamos y capturamos si ya existe
+                    try:
+                        conn.execute(text(
+                            "ALTER TABLE enrollments ADD COLUMN level VARCHAR(100) DEFAULT 'Único'"
+                        ))
+                    except Exception:
+                        pass  # columna ya existe
+                conn.commit()
+            print("✅ Migración 'level' ejecutada correctamente.")
+        except Exception as me:
+            print(f"⚠️ Migración omitida (puede que ya exista la columna): {me}")
+
         create_default_accounts()
         print("✅ Backend inicializado correctamente.")
 except Exception as e:
