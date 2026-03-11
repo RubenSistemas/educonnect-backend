@@ -16,8 +16,9 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super-secret-key-educon
 database_url = os.environ.get('DATABASE_URL')
 if database_url and database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
+elif not database_url:
     basedir = os.path.abspath(os.path.dirname(__file__))
-    database_url = 'sqlite:///' + os.path.join(basedir, 'educonnect_v2.db') # Forzad fresh start v2
+    database_url = 'sqlite:///' + os.path.join(basedir, 'educonnect_final.db') # Forzad v_final fresh start
 
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -30,15 +31,14 @@ db.init_app(app)
 def health_check():
     return jsonify({"status": "healthy", "database": "connected"}), 200
 
-# Importar rutas al final para evitar circularidad
-import routes 
-
 # Inicialización de DB
 with app.app_context():
     try:
         db.create_all()
+        # Importar rutas al final para evitar circularidad y asegurar esquema
+        import routes 
         create_default_accounts()
-        print("✅ Backend inicializado correctamente (v2).")
+        print("✅ Backend inicializado correctamente (v_final).")
     except Exception as e:
         print(f"⚠️ Error crítico en inicialización: {e}")
 
