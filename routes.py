@@ -190,7 +190,21 @@ def enroll_student(current_user):
     if not student_id or not subject_id:
         return jsonify({'message': 'student_id and subject_id are required'}), 400
     student = User.query.filter_by(id=student_id, role='estudiante').first()
-    subject = Subject.query.filter_by(id=subject_id).first()
+    
+    # If subject_id is not a number (name was used as fallback), look up by name
+    try:
+        subject_id_int = int(subject_id)
+        subject = Subject.query.filter_by(id=subject_id_int).first()
+    except (ValueError, TypeError):
+        # subject_id is actually a name string
+        subject = Subject.query.filter_by(name=subject_id).first()
+        if not subject:
+            # Create the subject if it doesn't exist yet
+            area = data.get('area', 'Técnica')
+            subject = Subject(name=subject_id, area=area, teacher_id=None)
+            db.session.add(subject)
+            db.session.flush()  # get the ID without committing
+    
     if not student or not subject:
         return jsonify({'message': 'Estudiante o Materia no encontrados'}), 404
     
