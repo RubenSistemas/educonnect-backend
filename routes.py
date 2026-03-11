@@ -506,3 +506,19 @@ def delete_resource(current_user, rid):
     db.session.delete(r)
     db.session.commit()
     return jsonify({'message': 'Recurso eliminado'})
+@app.route('/api/debug/db', methods=['GET'])
+def debug_db():
+    import traceback
+    try:
+        data = {
+            "users": User.query.count(),
+            "subjects": Subject.query.count(),
+            "enrollments": Enrollment.query.count(),
+            "db_url_end": str(db.engine.url).split('@')[-1] if '@' in str(db.engine.url) else "local"
+        }
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
