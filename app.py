@@ -31,41 +31,37 @@ db.init_app(app)
 def health_check():
     return jsonify({"status": "healthy", "database": "connected"}), 200
 
-# Inicialización de DB (Se ejecuta al importar el módulo)
-# Usamos un try/except para que no bloquee el inicio del servidor si hay un micro-error de red
-try:
-    with app.app_context():
-        # Importar rutas al final para evitar circularidad
-        import routes 
+# Importar rutas al final para evitar circularidad
+import routes 
+
+# Inicialización de DB
+with app.app_context():
+    try:
         db.create_all()
-        
-        # ── MIGRACIÓN SEGURA: añadir columna 'level' si no existe ──
+        # ── MIGRACIONES SEGURAS ──
         try:
             from sqlalchemy import text
             with db.engine.connect() as conn:
-                # PostgreSQL
+                # 1. Columna 'level' en enrollments
                 if 'postgresql' in str(db.engine.url):
-                    conn.execute(text(
-                        "ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS level VARCHAR(100) DEFAULT 'Único'"
-                    ))
+                    conn.execute(text("ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS level VARCHAR(100) DEFAULT 'Único'"))
+                    conn.execute(text("ALTER TABLE subjects ADD COLUMN IF NOT EXISTS area VARCHAR(100)"))
                 else:
-                    # SQLite no soporta IF NOT EXISTS en ALTER TABLE, 
-                    # intentamos y capturamos si ya existe
-                    try:
-                        conn.execute(text(
-                            "ALTER TABLE enrollments ADD COLUMN level VARCHAR(100) DEFAULT 'Único'"
-                        ))
-                    except Exception:
-                        pass  # columna ya existe
+                    # SQLite: area en subjects
+                    try: conn.execute(text("ALTER TABLE subjects ADD COLUMN area VARCHAR(100) DEFAULT 'Humanística'"))
+                    except Exception: pass
+                    # SQLite: level en enrollments
+                    try: conn.execute(text("ALTER TABLE enrollments ADD COLUMN level VARCHAR(100) DEFAULT 'Único'"))
+                    except Exception: pass
                 conn.commit()
-            print("✅ Migración 'level' ejecutada correctamente.")
+            print("✅ Migraciones de columnas ejecutadas.")
         except Exception as me:
-            print(f"⚠️ Migración omitida (puede que ya exista la columna): {me}")
+            print(f"⚠️ Migración omitida o ya existente: {me}")
 
         create_default_accounts()
         print("✅ Backend inicializado correctamente.")
-except Exception as e:
-    print(f"⚠️ Error durante la inicialización: {e}")
+    except Exception as e:
+        print(f"⚠️ Error durante la inicialización: {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
