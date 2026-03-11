@@ -220,18 +220,51 @@ def update_password(current_user, uid):
 @app.route('/api/secretaria/enroll', methods=['POST'])
 @token_required
 def enroll_student(current_user):
-    """Inscribir un estudiante a una materia."""
+    """Inscribir un estudiante a una materia o a todas las de Humanística."""
     if current_user.role not in ['secretaria', 'director']:
         return jsonify({'message': 'Unauthorized'}), 403
     data = request.get_json()
     student_id = data.get('student_id')
     subject_id = data.get('subject_id')
     level = data.get('level', 'Único')
+    area = data.get('area', 'Técnica')
+    
     if not student_id or not subject_id:
         return jsonify({'message': 'student_id and subject_id are required'}), 400
-    student = User.query.filter_by(id=student_id, role='estudiante').first()
     
-    # If subject_id is not a number (name was used as fallback), look up by name
+    student = User.query.filter_by(id=student_id, role='estudiante').first()
+    if not student:
+        return jsonify({'message': 'Estudiante no encontrado'}), 404
+
+    if subject_id == 'TODAS' and area == 'Humanística':
+        subjects_to_enroll = [
+            'Matematicas',
+            'Lenguaje y Comunicacion',
+            'Ciencias Naturales',
+            'Ciencias Sociales'
+        ]
+        enrollments = []
+        for s_name in subjects_to_enroll:
+            subject = Subject.query.filter_by(name=s_name, area='Humanística').first()
+            if not subject:
+                subject = Subject(name=s_name, area='Humanística', teacher_id=None)
+                db.session.add(subject)
+                db.session.flush()
+            
+            existing_enr = Enrollment.query.filter_by(student_id=student.id, subject_id=subject.id, level=level).first()
+            if not existing_enr:
+                enr = Enrollment(student_id=student.id, subject_id=subject.id, level=level)
+                db.session.add(enr)
+                enrollments.append(enr)
+        
+        db.session.commit()
+        return jsonify({
+            'message': 'Inscripción múltiple exitosa', 
+            'enrollments': [e.to_dict() for e in enrollments],
+            'subject_name': 'Todas las materias (Humanística)'
+        }), 201
+
+    # Single subject enrollment (fallback to existing logic)
     try:
         subject_id_int = int(subject_id)
         subject = Subject.query.filter_by(id=subject_id_int).first()
@@ -240,13 +273,12 @@ def enroll_student(current_user):
         subject = Subject.query.filter_by(name=subject_id).first()
         if not subject:
             # Create the subject if it doesn't exist yet
-            area = data.get('area', 'Técnica')
             subject = Subject(name=subject_id, area=area, teacher_id=None)
             db.session.add(subject)
             db.session.flush()  # get the ID without committing
     
-    if not student or not subject:
-        return jsonify({'message': 'Estudiante o Materia no encontrados'}), 404
+    if not subject:
+        return jsonify({'message': 'Materia no encontrada'}), 404
     
     # Check if already enrolled in this exact subject and level
     existing_enr = Enrollment.query.filter_by(student_id=student.id, subject_id=subject.id, level=level).first()
