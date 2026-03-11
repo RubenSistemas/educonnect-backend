@@ -38,30 +38,30 @@ import routes
 with app.app_context():
     try:
         db.create_all()
-        # ── MIGRACIONES SEGURAS ──
+        
+        # ── MIGRACIONES DE EMERGENCIA (SQLite / PostgreSQL) ──
         try:
             from sqlalchemy import text
             with db.engine.connect() as conn:
-                # 1. Columna 'level' en enrollments
                 if 'postgresql' in str(db.engine.url):
                     conn.execute(text("ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS level VARCHAR(100) DEFAULT 'Único'"))
-                    conn.execute(text("ALTER TABLE subjects ADD COLUMN IF NOT EXISTS area VARCHAR(100)"))
+                    conn.execute(text("ALTER TABLE subjects ADD COLUMN IF NOT EXISTS area VARCHAR(100) DEFAULT 'Humanística'"))
                 else:
                     # SQLite: area en subjects
                     try: conn.execute(text("ALTER TABLE subjects ADD COLUMN area VARCHAR(100) DEFAULT 'Humanística'"))
-                    except Exception: pass
+                    except: pass
                     # SQLite: level en enrollments
                     try: conn.execute(text("ALTER TABLE enrollments ADD COLUMN level VARCHAR(100) DEFAULT 'Único'"))
-                    except Exception: pass
+                    except: pass
                 conn.commit()
-            print("✅ Migraciones de columnas ejecutadas.")
+            print("✅ Esquema de base de datos verificado/actualizado.")
         except Exception as me:
-            print(f"⚠️ Migración omitida o ya existente: {me}")
+            print(f"⚠️ Nota de migración: {me}")
 
         create_default_accounts()
         print("✅ Backend inicializado correctamente.")
     except Exception as e:
-        print(f"⚠️ Error durante la inicialización: {e}")
+        print(f"⚠️ Error crítico en inicialización: {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

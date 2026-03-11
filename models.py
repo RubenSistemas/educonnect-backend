@@ -169,22 +169,19 @@ class SupportTicket(db.Model):
 
 def create_default_accounts():
     default_users = [
-        {"role": "director", "username": "director_admin.pruebas@educaruben.com",
-         "first_name": "Admin", "last_name": "Pruebas", "carnet": "101010"},
-        {"role": "secretaria", "username": "secretaria_ana.maria@educaruben.com",
-         "first_name": "Ana", "last_name": "Maria", "carnet": "202020"},
-        {"role": "profesor", "username": "profesor_juan.perez@educaruben.com",
-         "first_name": "Juan", "last_name": "Perez", "carnet": "12345"},
-        {"role": "profesor", "username": "profesor_ruben.condori@educaruben.com",
-         "first_name": "RUBEN", "last_name": "CONDORI", "carnet": "99999"},
-        {"role": "estudiante", "username": "estudiante_luis.gomez@educaruben.com",
-         "first_name": "Luis", "last_name": "Gomez", "carnet": "54321"},
+        {"role": "director", "first_name": "Admin", "last_name": "Pruebas", "carnet": "101010"},
+        {"role": "secretaria", "first_name": "Ana", "last_name": "Maria", "carnet": "202020"},
+        {"role": "profesor", "first_name": "Juan", "last_name": "Perez", "carnet": "12345"},
+        {"role": "profesor", "first_name": "RUBEN", "last_name": "CONDORI", "carnet": "99999"},
+        {"role": "estudiante", "first_name": "Luis", "last_name": "Gomez", "carnet": "54321"},
     ]
     for user_data in default_users:
-        if not User.query.filter_by(username=user_data['username']).first():
+        # El username ahora es el Carnet
+        username = user_data['carnet']
+        if not User.query.filter_by(username=username).first():
             new_user = User(
                 role=user_data['role'],
-                username=user_data['username'],
+                username=username,
                 first_name=user_data['first_name'],
                 last_name=user_data['last_name'],
                 carnet=user_data['carnet']
@@ -195,17 +192,17 @@ def create_default_accounts():
 
     # ── Especialidades oficiales del CEA ──
     all_specialties = [
-        ('Sistemas Infom\u00e1ticos', 'T\u00e9cnica'),
-        ('Belleza Integral', 'T\u00e9cnica'),
-        ('Gastronomia', 'T\u00e9cnica'),
-        ('Parvularia', 'T\u00e9cnica'),
-        ('Fisioterapia', 'T\u00e9cnica'),
-        ('Contabilidad Publica', 'T\u00e9cnica'),
-        ('Veterinaria', 'T\u00e9cnica'),
-        ('Matematicas', 'Human\u00edstica'),
-        ('Lenguaje y Comunicacion', 'Human\u00edstica'),
-        ('Ciencias Naturales', 'Human\u00edstica'),
-        ('Ciencias Sociales', 'Human\u00edstica'),
+        ('Sistemas Informáticos', 'Técnica'),
+        ('Belleza Integral', 'Técnica'),
+        ('Gastronomia', 'Técnica'),
+        ('Parvularia', 'Técnica'),
+        ('Fisioterapia', 'Técnica'),
+        ('Contabilidad Publica', 'Técnica'),
+        ('Veterinaria', 'Técnica'),
+        ('Matematicas', 'Humanística'),
+        ('Lenguaje y Comunicacion', 'Humanística'),
+        ('Ciencias Naturales', 'Humanística'),
+        ('Ciencias Sociales', 'Humanística'),
     ]
     for name, area in all_specialties:
         if not Subject.query.filter_by(name=name).first():
