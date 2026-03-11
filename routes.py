@@ -125,13 +125,24 @@ def create_user(current_user):
     if current_user.role not in ['secretaria', 'director']:
         return jsonify({'message': 'Unauthorized'}), 403
     data = request.get_json()
-    if User.query.filter_by(username=data.get('username')).first():
-        return jsonify({'message': 'Username already exists'}), 400
+    
+    # Generate the email username cleanly
+    first_name = data.get('first_name', '').strip()
+    last_name = data.get('last_name', '').strip()
+    raw_username = f"{first_name}{last_name}@educonnect.com".lower()
+    username = raw_username.replace(" ", "")
+    
+    if not username or username == "@educonnect.com":
+        return jsonify({'message': 'First name and last name are required to generate username'}), 400
+        
+    if User.query.filter_by(username=username).first():
+        return jsonify({'message': f'Username {username} already exists'}), 400
+        
     new_user = User(
         role=data['role'],
-        username=data['username'],
-        first_name=data['first_name'],
-        last_name=data['last_name'],
+        username=username,
+        first_name=first_name,
+        last_name=last_name,
         carnet=data['carnet']
     )
     new_user.set_password(data['carnet'])
