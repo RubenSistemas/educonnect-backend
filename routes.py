@@ -533,3 +533,18 @@ def debug_db():
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
+
+@app.route('/api/migrate_usernames', methods=['GET'])
+def migrate_usernames():
+    try:
+        users = User.query.all()
+        count = 0
+        for u in users:
+            new_username = f"{u.first_name}{u.last_name}@educonnect.com".replace(" ", "").lower()
+            if u.username != new_username:
+                u.username = new_username
+                count += 1
+        db.session.commit()
+        return jsonify({"message": f"Migrated {count} users to new email usernames."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

@@ -176,8 +176,10 @@ def create_default_accounts():
         {"role": "estudiante", "first_name": "Luis", "last_name": "Gomez", "carnet": "54321"},
     ]
     for user_data in default_users:
-        # El username ahora es el Carnet
-        username = user_data['carnet']
+        # El username ahora es nombre+apellido@educonnect.com
+        raw_username = f"{user_data['first_name']}{user_data['last_name']}@educonnect.com".lower()
+        # Eliminar espacios por si acaso
+        username = raw_username.replace(" ", "")
         if not User.query.filter_by(username=username).first():
             new_user = User(
                 role=user_data['role'],
