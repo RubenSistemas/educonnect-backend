@@ -548,6 +548,18 @@ def debug_db():
             "traceback": traceback.format_exc()
         }), 500
 
+@app.route('/api/debug/me', methods=['GET'])
+@token_required
+def debug_me(current_user):
+    """Returns the role and info of the current token's user – for debugging auth issues."""
+    return jsonify({
+        'id': current_user.id,
+        'username': current_user.username,
+        'role': current_user.role,
+        'first_name': current_user.first_name,
+        'last_name': current_user.last_name,
+    })
+
 @app.route('/api/migrate_usernames', methods=['GET'])
 def migrate_usernames():
     try:
