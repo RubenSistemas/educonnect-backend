@@ -343,6 +343,41 @@ def unenroll_student(current_user, enrollment_id):
     db.session.delete(enrollment)
     db.session.commit()
     return jsonify({'message': 'Inscripción eliminada exitosamente'})
+
+@app.route('/api/secretaria/report/enrollments_by_level', methods=['GET'])
+@token_required
+def report_enrollments_by_level(current_user):
+    if current_user.role not in ['director', 'secretaria']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    
+    level = request.args.get('level')
+    if not level:
+        return jsonify({'message': 'Falta el nivel'}), 400
+    
+    # Query enrollments for this level
+    enrollments = Enrollment.query.filter_by(level=level).all()
+    
+    results = []
+    for enr in enrollments:
+        teacher_name = "No asignado"
+        subject_name = enr.subject.name if enr.subject else "N/A"
+        # Since we use subject name 'Sin especialidad' for EPA, we rename it here too
+        if subject_name == 'Sin especialidad':
+            subject_name = 'EDUCACION PRIMARIA DE ADULTOS'
+            
+        if enr.subject and enr.subject.teacher:
+            teacher_name = f"{enr.subject.teacher.first_name} {enr.subject.teacher.last_name}"
+            
+        results.append({
+            'student_name': f"{enr.student.first_name} {enr.student.last_name}" if enr.student else "N/A",
+            'student_carnet': enr.student.carnet if enr.student else "N/A",
+            'area': enr.subject.area if enr.subject else "N/A",
+            'subject': subject_name,
+            'level': enr.level,
+            'teacher': teacher_name
+        })
+        
+    return jsonify(results)
 # ─── DOCUMENTS ────────────────────────────────────────────────────────────────
 @app.route('/api/secretaria/documents/<int:student_id>', methods=['GET'])
 @token_required
