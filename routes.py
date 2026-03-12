@@ -757,7 +757,10 @@ def performance_stats(current_user):
     if current_user.role != 'director':
         return jsonify({'message': 'Unauthorized'}), 403
     
-    levels = ["Nivel Básico", "Nivel Auxiliar", "Nivel Medio", "Primer Nivel", "Segundo Nivel", "Tercer Nivel"]
+    levels = [
+        "NIVEL BASICO", "NIVEL AUXILIAR", "NIVEL MEDIO I", "NIVEL MEDIO II",
+        "CICLO DE APRENDIZAJES APLICADOS", "CICLO DE APRENDIZAJES COMPLEMENTARIOS", "CICLO DE APRENDIZAJES ESPECIALIZADOS"
+    ]
     performance = {}
     
     for lvl in levels:
