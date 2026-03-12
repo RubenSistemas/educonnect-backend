@@ -65,7 +65,21 @@ def get_personnel(current_user):
     if current_user.role != 'director':
         return jsonify({'message': 'Unauthorized'}), 403
     personnel = User.query.filter(User.role.in_(['profesor', 'secretaria'])).all()
-    return jsonify([p.to_dict() for p in personnel])
+    results = []
+    for p in personnel:
+        d = p.to_dict()
+        if p.role == 'profesor':
+            subject = Subject.query.filter_by(teacher_id=p.id).first()
+            if subject:
+                d['especialidad'] = 'EDUCACION PRIMARIA DE ADULTOS' if subject.name == 'Sin especialidad' else subject.name
+                d['area'] = subject.area
+                d['nivel'] = subject.level
+            else:
+                d['especialidad'] = "No asignado"
+                d['area'] = None
+                d['nivel'] = None
+        results.append(d)
+    return jsonify(results)
 # Los anuncios se manejan al final con /api/announcement
 # ─── SUBJECTS (Director & Secretaria) ─────────────────────────────────────────
 @app.route('/api/subjects', methods=['GET'])
@@ -85,7 +99,12 @@ def create_subject(current_user):
     data = request.get_json()
     if not data or not data.get('name') or not data.get('area'):
         return jsonify({'message': 'Subject name and area are required'}), 400
-    subject = Subject(name=data['name'], area=data['area'], teacher_id=data.get('teacher_id'))
+    teacher_id = data.get('teacher_id')
+    if teacher_id:
+        # Clear previous assignments for this teacher
+        Subject.query.filter_by(teacher_id=teacher_id).update({"teacher_id": None})
+    
+    subject = Subject(name=data['name'], area=data['area'], teacher_id=teacher_id)
     db.session.add(subject)
     db.session.commit()
     return jsonify({'message': 'Materia creada exitosamente', 'subject': subject.to_dict()}), 201
@@ -102,6 +121,9 @@ def assign_teacher(current_user, subject_id):
         teacher = User.query.filter_by(id=teacher_id, role='profesor').first()
         if not teacher:
             return jsonify({'message': 'Teacher not found'}), 404
+        # Clear previous assignments for this teacher
+        Subject.query.filter_by(teacher_id=teacher_id).update({"teacher_id": None})
+    
     subject.teacher_id = teacher_id
     db.session.commit()
     return jsonify({'message': 'Docente asignado exitosamente', 'subject': subject.to_dict()})
@@ -319,9 +341,9 @@ def assign_teacher_level(current_user):
     if not teacher:
         return jsonify({'message': 'Teacher not found'}), 404
         
-    # Check if a subject with this name, area, and level already exists
-    subject = Subject.query.filter_by(name=subject_name, area=area, level=level).first()
-    
+    # Clear previous assignments for this teacher
+    Subject.query.filter_by(teacher_id=teacher_id).update({"teacher_id": None})
+
     if subject:
         # Assign teacher to existing subject
         subject.teacher_id = teacher_id
@@ -369,6 +391,8 @@ def report_enrollments_by_level(current_user):
             teacher_name = f"{enr.subject.teacher.first_name} {enr.subject.teacher.last_name}"
             
         results.append({
+            'id': enr.id,
+            'student_id': enr.student_id,
             'student_name': f"{enr.student.first_name} {enr.student.last_name}" if enr.student else "N/A",
             'student_carnet': enr.student.carnet if enr.student else "N/A",
             'area': enr.subject.area if enr.subject else "N/A",
@@ -606,7 +630,8 @@ def get_messages(current_user):
     return jsonify({
         'received': [{
             'id': m.id,
-            'sender': f"{m.sender.first_name} {m.sender.last_name} ({m.sender.role})",
+            'sender': f"{m.sender.first_name} {m.sender.last_name}",
+            'sender_role': m.sender.role,
             'message': m.message,
             'date': m.timestamp.strftime("%Y-%m-%d %H:%M")
         } for m in received],
@@ -725,3 +750,63 @@ def migrate_usernames():
         return jsonify({"message": f"Migrated {count} users to new email usernames."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/director/stats/performance', methods=['GET'])
+@token_required
+def performance_stats(current_user):
+    if current_user.role != 'director':
+        return jsonify({'message': 'Unauthorized'}), 403
+    
+    levels = ["Nivel Básico", "Nivel Auxiliar", "Nivel Medio", "Primer Nivel", "Segundo Nivel", "Tercer Nivel"]
+    performance = {}
+    
+    for lvl in levels:
+        enrollments = Enrollment.query.filter_by(level=lvl).all()
+        if not enrollments:
+            performance[lvl] = {"avg": 0, "pass": 0, "fail": 0, "total": 0}
+            continue
+            
+        total_score = 0
+        pass_count = 0
+        fail_count = 0
+        valid_students = 0
+        
+        for enr in enrollments:
+            grades = Grade.query.filter_by(enrollment_id=enr.id).all()
+            if not grades:
+                continue
+                
+            student_avg = sum(g.score for g in grades) / len(grades)
+            total_score += student_avg
+            if student_avg >= 61:
+                pass_count += 1
+            else:
+                fail_count += 1
+            valid_students += 1
+            
+        performance[lvl] = {
+            "avg": round(total_score / valid_students, 1) if valid_students > 0 else 0,
+            "pass": pass_count,
+            "fail": fail_count,
+            "total": valid_students
+        }
+        
+    return jsonify(performance)
+
+@app.route('/api/admin/reset_password', methods=['POST'])
+@token_required
+def admin_reset_password(current_user):
+    if current_user.role not in ['director', 'secretaria']:
+        return jsonify({'message': 'Unauthorized'}), 403
+        
+    data = request.get_json()
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'message': 'user_id is required'}), 400
+        
+    user = User.query.get_or_404(user_id)
+    user.set_password(user.carnet)
+    db.session.commit()
+    
+    return jsonify({'message': f'Contraseña de {user.first_name} restablecida a su carnet correctamente.'})
+
