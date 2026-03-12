@@ -176,12 +176,17 @@ def get_users_grouped(current_user):
         if u.role in ['director', 'secretaria']:
             groups['administrativos'].append(entry)
         elif u.role == 'profesor':
-            # Get their assigned subjects
-            subj = Subject.query.filter_by(teacher_id=u.id).first()
-            if subj:
-                entry['especialidad'] = subj.name
-                entry['area'] = subj.area
-                entry['nivel'] = subj.level
+            # Get all their assigned subjects
+            subjects = Subject.query.filter_by(teacher_id=u.id).all()
+            entry['asignaciones'] = [
+                {'especialidad': s.name, 'area': s.area, 'nivel': s.level} 
+                for s in subjects
+            ]
+            # Keep these for single-subject compatibility
+            if subjects:
+                entry['especialidad'] = subjects[0].name
+                entry['area'] = subjects[0].area
+                entry['nivel'] = subjects[0].level
             groups['docentes'].append(entry)
         elif u.role == 'estudiante':
             # Look up their enrollment area
