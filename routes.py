@@ -356,6 +356,9 @@ def assign_teacher_level(current_user):
     # Clear previous assignments for this teacher
     Subject.query.filter_by(teacher_id=teacher_id).update({"teacher_id": None})
 
+    # Find existing subject or create new one
+    subject = Subject.query.filter_by(name=subject_name, area=area, level=level).first()
+
     if subject:
         # Assign teacher to existing subject
         subject.teacher_id = teacher_id
