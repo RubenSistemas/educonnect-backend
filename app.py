@@ -37,7 +37,7 @@ with app.app_context():
         db.create_all()
         # Importar rutas al final para evitar circularidad y asegurar esquema
         import routes 
-        create_default_accounts()
+        # create_default_accounts()
         print("OK: Backend inicializado correctamente (v_final).")
     except Exception as e:
         print(f"ERROR: Error critico en inicializacion: {e}")

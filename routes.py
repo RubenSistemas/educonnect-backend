@@ -127,6 +127,7 @@ def assign_teacher(current_user, subject_id):
     subject.teacher_id = teacher_id
     db.session.commit()
     return jsonify({'message': 'Docente asignado exitosamente', 'subject': subject.to_dict()})
+
 @app.route('/api/subjects/<int:subject_id>/students', methods=['GET'])
 @token_required
 def get_enrolled_students(current_user, subject_id):
@@ -140,6 +141,17 @@ def get_enrolled_students(current_user, subject_id):
         'students': [e.to_dict() for e in enrollments],
         'total': len(enrollments)
     })
+
+@app.route('/api/subjects/<int:subject_id>', methods=['DELETE'])
+@token_required
+def delete_subject(current_user, subject_id):
+    """Eliminar una materia (solo director)."""
+    if current_user.role != 'director':
+        return jsonify({'message': 'Unauthorized'}), 403
+    subject = Subject.query.get_or_404(subject_id)
+    db.session.delete(subject)
+    db.session.commit()
+    return jsonify({'message': 'Materia eliminada exitosamente'})
 # ─── SECRETARY ────────────────────────────────────────────────────────────────
 @app.route('/api/secretaria/users', methods=['POST'])
 @token_required
@@ -359,7 +371,7 @@ def assign_teacher_level(current_user):
 @token_required
 def unenroll_student(current_user, enrollment_id):
     """Eliminar una inscripción."""
-    if current_user.role not in ['secretaria', 'director']:
+    if current_user.role != 'director':
         return jsonify({'message': 'Unauthorized'}), 403
     enrollment = Enrollment.query.get_or_404(enrollment_id)
     db.session.delete(enrollment)
@@ -816,7 +828,7 @@ def admin_reset_password(current_user):
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @token_required
 def admin_delete_user(current_user, user_id):
-    if current_user.role not in ['director', 'secretaria']:
+    if current_user.role != 'director':
         return jsonify({'message': 'Unauthorized'}), 403
         
     if current_user.id == user_id:
