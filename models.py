@@ -39,6 +39,7 @@ class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     area = db.Column(db.String(50), nullable=False, default='Humanística')
+    level = db.Column(db.String(50), nullable=False, default='Único')
     teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     teacher = db.relationship('User', backref='subjects')
 
@@ -54,6 +55,7 @@ class Subject(db.Model):
             'id': self.id,
             'name': self.name,
             'area': self.area,
+            'level': self.level,
             'teacher_id': self.teacher_id,
             'teacher_name': teacher_name,
             'enrolled_count': enrolled_count

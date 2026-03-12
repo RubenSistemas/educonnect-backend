@@ -176,6 +176,12 @@ def get_users_grouped(current_user):
         if u.role in ['director', 'secretaria']:
             groups['administrativos'].append(entry)
         elif u.role == 'profesor':
+            # Get their assigned subjects
+            subj = Subject.query.filter_by(teacher_id=u.id).first()
+            if subj:
+                entry['especialidad'] = subj.name
+                entry['area'] = subj.area
+                entry['nivel'] = subj.level
             groups['docentes'].append(entry)
         elif u.role == 'estudiante':
             # Look up their enrollment area
@@ -270,7 +276,7 @@ def enroll_student(current_user):
         subject = Subject.query.filter_by(id=subject_id_int).first()
     except (ValueError, TypeError):
         # subject_id is actually a name string
-        subject = Subject.query.filter_by(name=subject_id).first()
+        subject = Subject.query.filter_by(name=subject_id, area=area).first()
         if not subject:
             # Create the subject if it doesn't exist yet
             subject = Subject(name=subject_id, area=area, teacher_id=None)
@@ -289,6 +295,39 @@ def enroll_student(current_user):
     db.session.add(enrollment)
     db.session.commit()
     return jsonify({'message': 'Inscripción exitosa', 'enrollment': enrollment.to_dict()}), 201
+
+@app.route('/api/secretaria/assign_teacher_level', methods=['POST'])
+@token_required
+def assign_teacher_level(current_user):
+    if current_user.role not in ['secretaria', 'director']:
+        return jsonify({'message': 'Unauthorized'}), 403
+    data = request.get_json()
+    teacher_id = data.get('teacher_id')
+    subject_name = data.get('subject_name')
+    area = data.get('area')
+    level = data.get('level')
+    
+    if not teacher_id or not subject_name or not area or not level:
+        return jsonify({'message': 'Missing required fields'}), 400
+        
+    teacher = User.query.filter_by(id=teacher_id, role='profesor').first()
+    if not teacher:
+        return jsonify({'message': 'Teacher not found'}), 404
+        
+    # Check if a subject with this name, area, and level already exists
+    subject = Subject.query.filter_by(name=subject_name, area=area, level=level).first()
+    
+    if subject:
+        # Assign teacher to existing subject
+        subject.teacher_id = teacher_id
+    else:
+        # Create new level-specific subject record
+        subject = Subject(name=subject_name, area=area, level=level, teacher_id=teacher_id)
+        db.session.add(subject)
+        
+    db.session.commit()
+    return jsonify({'message': 'Teacher assigned to level successfully', 'subject': subject.to_dict()})
+
 @app.route('/api/secretaria/enroll/<int:enrollment_id>', methods=['DELETE'])
 @token_required
 def unenroll_student(current_user, enrollment_id):
