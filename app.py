@@ -38,9 +38,9 @@ with app.app_context():
         # Importar rutas al final para evitar circularidad y asegurar esquema
         import routes 
         create_default_accounts()
-        print("✅ Backend inicializado correctamente (v_final).")
+        print("OK: Backend inicializado correctamente (v_final).")
     except Exception as e:
-        print(f"⚠️ Error crítico en inicialización: {e}")
+        print(f"ERROR: Error critico en inicializacion: {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

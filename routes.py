@@ -813,3 +813,21 @@ def admin_reset_password(current_user):
     
     return jsonify({'message': f'Contraseña de {user.first_name} restablecida a su carnet correctamente.'})
 
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@token_required
+def admin_delete_user(current_user, user_id):
+    if current_user.role not in ['director', 'secretaria']:
+        return jsonify({'message': 'Unauthorized'}), 403
+        
+    if current_user.id == user_id:
+        return jsonify({'message': 'No puedes eliminarte a ti mismo'}), 400
+        
+    user = User.query.get_or_404(user_id)
+    
+    # Optional: Check if deleting an admin
+    if user.role == 'director' and current_user.role != 'director':
+        return jsonify({'message': 'Solo un Director puede eliminar a otro Director'}), 403
+
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': f'Usuario {user.first_name} {user.last_name} eliminado correctamente.'})
