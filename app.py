@@ -6,9 +6,21 @@ from models import db, create_default_accounts
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend', static_url_path='')
 # Permitir CORS para todos los orígenes en las rutas /api/
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+@app.route('/')
+def serve_index():
+    return app.send_static_file('index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    import os
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return app.send_static_file(path)
+    else:
+        return app.send_static_file('index.html')
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super-secret-key-educonnect-ruben')
 
